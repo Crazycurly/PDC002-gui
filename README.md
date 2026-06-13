@@ -2,7 +2,8 @@
 
 A native macOS app for flashing firmware onto the WITRN PDC002 USB-C
 Power-Delivery trigger cable — a replacement for the Windows-only
-`WITRN Upgrade 4.0.exe`.
+`WITRN Upgrade 4.0.exe`. See the [product page](https://www.witrn.com/?p=556)
+for the cable itself.
 
 The PDC002's inline HID programmer (USB VID `0x0716`, PID `0x5036`) accepts
 52 KB firmware images that determine which voltage/mode the cable requests
@@ -40,7 +41,8 @@ with a full-width status bar along the bottom.
 
 ## Build
 
-Requires Xcode (for SwiftUI/XCTest). No third-party dependencies.
+Requires macOS 13+ and Xcode (for SwiftUI/XCTest). No third-party
+dependencies.
 
 ```sh
 swift test               # hardware-free protocol tests
@@ -50,6 +52,11 @@ open PDC002.app
 
 If `xcode-select -p` points at the CommandLineTools, the script selects the
 Xcode toolchain via `DEVELOPER_DIR` automatically.
+
+The app icon is generated, not stored as a bitmap: `make_app.sh` runs
+`Scripts/make_icon.swift` (pure Core Graphics, re-rendered crisp at every
+size) and bundles the resulting `.icns`, regenerating only when the generator
+changes.
 
 The app is unsandboxed and ad-hoc signed for local use; vendor-defined HID
 devices need no special entitlements or Input Monitoring permission.
@@ -66,25 +73,25 @@ devices need no special entitlements or Input Monitoring permission.
   52-byte block at flash `0xFC00` holding the charger's recorded PDO list
   (4-byte mode words), the selected request mode, the saved target voltage,
   and a trailing additive checksum. It is read with read-info and rewritten
-  with a single-page erase + 40-byte/12-byte write chunks (see
-  `reference/PDC002/traces/pps-config.txt`); the PDO decode mirrors
-  `pdc-control`'s `readModes`. Re-encoding preserves every unedited byte and
+  with a single-page erase + 40-byte/12-byte write chunks; the PDO decode
+  mirrors `pdc-control`'s `readModes`. Re-encoding preserves every unedited byte and
   derives the new checksum as a delta, so an unrecognized field is never
   clobbered.
 - **.pd1s container** (`PD1S.swift`, `SBox.swift`): the whole file is passed
   through a fixed 256-byte substitution table. Decoded files start with the
   ASCII magic `gzutapp` and a build date, followed by the raw 53,248-byte
   firmware body. `Scripts/gen_sbox.py` regenerates the table from a known
-  raw/encoded pair in `reference/`.
+  raw/encoded pair.
 - The protocol layer is pure Swift over a `FrameTransport` abstraction;
   `Tests/PDC002KitTests` exercises it against captured USB traces and a mock
   device, including a full flash + verify cycle.
 
 ## Credits
 
-The HID protocol was reverse engineered in `reference/PDC002`
-(`pdc002.py`, Saleae traces) — this app mirrors that work. Firmware images
-are the official WITRN releases bundled with their Windows tool.
+The HID protocol was reverse engineered by [sambenz/PDC002](https://github.com/sambenz/PDC002)
+(`pdc002.py`, Saleae traces) — this app mirrors and builds on that work.
+Firmware images are the official WITRN releases bundled with their Windows
+tool. The cable itself is the [WITRN PDC002](https://www.witrn.com/?p=556).
 
 ## Safety
 
