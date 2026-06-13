@@ -25,9 +25,9 @@ struct PDC002App: App {
     var body: some Scene {
         WindowGroup("PDC002 Flasher") {
             ContentView(viewModel: viewModel)
-                .frame(minWidth: 640, minHeight: 460)
+                .frame(minWidth: 560, minHeight: 320)
         }
-        .defaultSize(width: 780, height: 540)
+        .defaultSize(width: 780, height: 439)
     }
 }
 

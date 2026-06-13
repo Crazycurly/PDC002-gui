@@ -9,6 +9,8 @@ The PDC002's inline HID programmer (USB VID `0x0716`, PID `0x5036`) accepts
 from a PD supply (fixed 5–20 V, highest, polling, EPR/AVS 15–28 V,
 Xiaomi MI 120 W, and PC-configurable "online" firmware).
 
+![PDC002 Flasher](docs/screenshot.png)
+
 ## Features
 
 - Live detection of the PDC002 programmer (connect/disconnect).
@@ -21,11 +23,20 @@ Xiaomi MI 120 W, and PC-configurable "online" firmware).
   into a bad image.
 - PPS arbitrary voltage (Online/PC-config firmware): **Read Line** ("读线")
   reads the charger's recorded PDO list and current selection from the
-  config block; pick a request mode (lowest/highest/rotate or a specific
-  PDO) and, for a PPS PDO, a target voltage in 20 mV steps, then **Write
-  Line** ("写线") stores it (read-modify-write with read-back verify; the
-  recorded PDO list is preserved and no reset is issued).
-- Reset command and a collapsible raw TX/RX frame log.
+  config block and shows the PDOs in a table (the active one highlighted);
+  pick a request mode (lowest/highest/rotate or a specific PDO) and, for a
+  PPS PDO, a target voltage set with a slider or typed in directly (clamped
+  to the charger's window and snapped to 20 mV steps), then **Write Line**
+  ("写线") stores it (read-modify-write with read-back verify; the recorded
+  PDO list is preserved and no reset is issued).
+- Reset command, plus a bottom status bar showing operation progress and the
+  last result.
+
+## Layout
+
+A two-column window: firmware selection and flash actions on the left, the
+PPS arbitrary-voltage panel (the part used most) given the room on the right,
+with a full-width status bar along the bottom.
 
 ## Build
 

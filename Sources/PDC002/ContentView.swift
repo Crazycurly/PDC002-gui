@@ -6,7 +6,6 @@ struct ContentView: View {
     @ObservedObject var viewModel: FlasherViewModel
     @State private var showFileImporter = false
     @State private var showFlashConfirmation = false
-    @State private var showLog = false
 
     private static let pd1sType = UTType(filenameExtension: "pd1s") ?? .data
 
@@ -14,11 +13,13 @@ struct ContentView: View {
         VStack(spacing: 12) {
             statusPill
             HStack(alignment: .top, spacing: 12) {
-                firmwareList
-                detailCard
+                firmwareCard
+                    .frame(width: 260)
+                PPSPanel(viewModel: viewModel)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            PPSPanel(viewModel: viewModel)
-            logSection
+            .frame(maxHeight: .infinity)
+            statusBar
         }
         .padding(12)
         .alert(
@@ -67,80 +68,13 @@ struct ContentView: View {
         .background(.quaternary, in: Capsule())
     }
 
-    // MARK: - Firmware list
-
-    private var firmwareList: some View {
-        VStack(spacing: 8) {
-            List(selection: presetSelection) {
-                ForEach(FirmwareGroup.allCases, id: \.self) { group in
-                    Section(group.rawValue) {
-                        ForEach(FirmwareCatalog.presets.filter { $0.group == group }) { preset in
-                            Text(preset.name).tag(preset.id)
-                        }
-                    }
-                }
-            }
-            .listStyle(.bordered)
-            Button("Open .pd1s…") { showFileImporter = true }
-                .frame(maxWidth: .infinity)
-        }
-        .frame(width: 290)
-    }
-
-    private var presetSelection: Binding<String?> {
-        .init(
-            get: { viewModel.selectedPresetID },
-            set: { id in
-                if let id, let preset = FirmwareCatalog.preset(id: id) {
-                    viewModel.selectPreset(preset)
-                }
-            })
-    }
-
-    // MARK: - Detail + actions
-
-    private var detailCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if let loaded = viewModel.loadedFirmware {
-                Text(loaded.name).font(.title3.bold())
-                Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 4) {
-                    GridRow {
-                        Text("Build date").foregroundStyle(.secondary)
-                        Text(loaded.firmware.buildDateString)
-                    }
-                    GridRow {
-                        Text("Size").foregroundStyle(.secondary)
-                        Text("\(loaded.firmware.body.count) bytes")
-                    }
-                    GridRow {
-                        Text("Source").foregroundStyle(.secondary)
-                        Text(loaded.source).lineLimit(1).truncationMode(.middle)
-                    }
-                    if loaded.presetID != nil, loaded.source != "Bundled preset" {
-                        GridRow {
-                            Text("Matches preset").foregroundStyle(.secondary)
-                            Text(FirmwareCatalog.preset(id: loaded.presetID!)?.name ?? "")
-                        }
-                    }
-                }
-                .font(.callout)
-            } else {
-                Text("Select a firmware preset or open a .pd1s file.")
-                    .foregroundStyle(.secondary)
-            }
-
-            Divider()
-
-            HStack(spacing: 6) {
-                Text("Currently on device:").foregroundStyle(.secondary)
-                Text(viewModel.deviceFirmwareName ?? "—")
-            }
-            .font(.callout)
-
-            Spacer(minLength: 8)
-
+    /// Operation output (progress while busy, last result otherwise), shown
+    /// full-width along the bottom where the log panel used to be.
+    @ViewBuilder
+    private var statusBar: some View {
+        Group {
             if viewModel.busy {
-                VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 10) {
                     Text(viewModel.phaseDescription + "…").font(.callout)
                     if let progress = viewModel.progress {
                         ProgressView(value: progress)
@@ -152,50 +86,102 @@ struct ContentView: View {
                 Label(status, systemImage: "checkmark.circle")
                     .font(.callout)
                     .foregroundStyle(.green)
+            } else {
+                Text("Ready")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+    }
 
-            Toggle("Verify after flash", isOn: $viewModel.verifyAfterFlash)
-                .toggleStyle(.checkbox)
+    // MARK: - Firmware (compact)
 
+    private var firmwareCard: some View {
+        GroupBox("Firmware") {
+            VStack(alignment: .leading, spacing: 8) {
+                List(selection: presetSelection) {
+                    ForEach(FirmwareGroup.allCases, id: \.self) { group in
+                        Section(group.rawValue) {
+                            ForEach(FirmwareCatalog.presets.filter { $0.group == group }) { preset in
+                                Text(preset.name).tag(String?.some(preset.id))
+                            }
+                        }
+                    }
+                }
+                .listStyle(.bordered)
+                .frame(height: 132)
+
+                Button("Open .pd1s…") { showFileImporter = true }
+                    .frame(maxWidth: .infinity)
+
+                firmwareDetailLine
+
+                HStack(spacing: 6) {
+                    Text("On device:").foregroundStyle(.secondary)
+                    Text(viewModel.deviceFirmwareName ?? "—").lineLimit(1)
+                }
+                .font(.callout)
+
+                actionRow
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(6)
+        }
+    }
+
+    @ViewBuilder
+    private var firmwareDetailLine: some View {
+        if let loaded = viewModel.loadedFirmware {
+            let isFile = loaded.source != "Bundled preset"
+            VStack(alignment: .leading, spacing: 2) {
+                if isFile {
+                    Text(loaded.name).lineLimit(1).truncationMode(.middle)
+                }
+                Text("Build \(loaded.firmware.buildDateString) · \(loaded.firmware.body.count) bytes")
+                    .foregroundStyle(.secondary)
+            }
+            .font(.callout)
+        } else {
+            Text("Select a firmware preset or open a .pd1s file.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var actionRow: some View {
+        VStack(spacing: 8) {
             HStack {
+                Toggle("Verify", isOn: $viewModel.verifyAfterFlash)
+                    .toggleStyle(.checkbox)
+                Spacer()
                 Button("Flash") { showFlashConfirmation = true }
                     .keyboardShortcut(.defaultAction)
                     .disabled(
                         viewModel.loadedFirmware == nil || !viewModel.deviceConnected
                             || viewModel.busy)
+            }
+            HStack {
                 Button("Identify") { viewModel.identify() }
+                    .frame(maxWidth: .infinity)
                     .disabled(!viewModel.deviceConnected || viewModel.busy)
                 Button("Reset") { viewModel.resetDevice() }
+                    .frame(maxWidth: .infinity)
                     .disabled(!viewModel.deviceConnected || viewModel.busy)
             }
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
     }
 
-    // MARK: - Log
-
-    private var logSection: some View {
-        DisclosureGroup("Log", isExpanded: $showLog) {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 1) {
-                        ForEach(viewModel.logLines) { line in
-                            Text(line.text)
-                                .font(.system(size: 10, design: .monospaced))
-                                .textSelection(.enabled)
-                                .id(line.id)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+    private var presetSelection: Binding<String?> {
+        .init(
+            get: { viewModel.selectedPresetID },
+            set: { id in
+                if let id, let preset = FirmwareCatalog.preset(id: id) {
+                    viewModel.selectPreset(preset)
                 }
-                .frame(height: 140)
-                .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
-                .onChange(of: viewModel.logLines.last?.id) { id in
-                    if let id { proxy.scrollTo(id, anchor: .bottom) }
-                }
-            }
-        }
+            })
     }
 }

@@ -9,11 +9,6 @@ struct LoadedFirmware: Equatable {
     let firmware: Firmware
 }
 
-struct LogLine: Identifiable, Equatable {
-    let id: Int
-    let text: String
-}
-
 @MainActor
 final class FlasherViewModel: ObservableObject {
     enum Operation: String {
@@ -51,12 +46,6 @@ final class FlasherViewModel: ObservableObject {
     /// just-flashed name across the reconnect so the status reflects it.
     private var firmwareNameToRestoreOnReconnect: String?
 
-    @Published private(set) var logLines: [LogLine] = []
-    private var logCounter = 0
-    private var pendingLogLines: [LogLine] = []
-    private var logFlushScheduled = false
-    private static let logLimit = 400
-
     private var cancellables: Set<AnyCancellable> = []
 
     var deviceConnected: Bool { deviceManager.deviceName != nil }
@@ -78,13 +67,8 @@ final class FlasherViewModel: ObservableObject {
                     self.deviceFirmwareName = restored
                     self.firmwareNameToRestoreOnReconnect = nil
                 }
-                self.appendLog(name.map { "Device connected: \($0)" } ?? "Device disconnected")
             }
             .store(in: &cancellables)
-        deviceManager.logHandler = { [weak self] event in
-            let text = "\(event.direction.rawValue) \(event.bytes.map { String(format: "%02x", $0) }.joined())"
-            Task { @MainActor in self?.appendLog(text) }
-        }
     }
 
     // MARK: - Firmware selection
@@ -115,7 +99,6 @@ final class FlasherViewModel: ObservableObject {
                 source: url.path,
                 presetID: presetID,
                 firmware: firmware)
-            appendLog("Loaded \(url.lastPathComponent) (build \(firmware.buildDateString))")
         } catch {
             errorMessage = "Not a valid .pd1s file: \(error.localizedDescription)"
         }
@@ -309,29 +292,6 @@ final class FlasherViewModel: ObservableObject {
             self.currentOperation = nil
             self.progress = nil
             self.phaseDescription = ""
-        }
-    }
-
-    /// Log lines arrive once per HID frame (thousands during a read), so
-    /// they are buffered and the published array refreshed a few times a
-    /// second; publishing per frame would re-render the UI per frame.
-    private func appendLog(_ text: String) {
-        logCounter += 1
-        pendingLogLines.append(LogLine(id: logCounter, text: text))
-        if !logFlushScheduled {
-            logFlushScheduled = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
-                self?.flushLog()
-            }
-        }
-    }
-
-    private func flushLog() {
-        logFlushScheduled = false
-        logLines.append(contentsOf: pendingLogLines)
-        pendingLogLines.removeAll()
-        if logLines.count > Self.logLimit {
-            logLines.removeFirst(logLines.count - Self.logLimit)
         }
     }
 
