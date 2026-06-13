@@ -218,12 +218,63 @@ final class PPSConfigTests: XCTestCase {
     }
 
     /// Re-encoding "min" -> "max" must reproduce the captured "max" block,
-    /// including the trailing checksum (0x64 -> 0x65), confirming the additive
-    /// delta recompute matches the device.
+    /// including the trailing checksum (0x64 -> 0x65), confirming the XOR
+    /// recompute matches the device. (This single-bit selection flip is the
+    /// case where an additive sum and an XOR coincide, which originally masked
+    /// the wrong checksum formula.)
     func testUpdateReproducesCapturedWrite() throws {
         let min = try PPSConfig(block: Self.traceBlockMin)
         let updated = min.updating(selection: .highest, savedMillivolts: 5000)
         XCTAssertEqual(updated.raw, Self.traceBlockMax)
+    }
+
+    /// Byte 51 is an XOR of bytes [0..50]. Every captured block — the two
+    /// trace blocks and the real-charger dump — must satisfy this, pinning the
+    /// formula the cable validates on attach.
+    func testChecksumIsXorOfBlock() throws {
+        let realCharger: [UInt8] = [
+            160, 163, 232, 28, 1, 6, 0, 44, 145, 1, 10, 44, 209, 2, 0, 44, 193, 3,
+            0, 44, 177, 4, 0, 69, 65, 6, 0, 60, 33, 164, 201, 0, 0, 0, 0, 166, 255,
+            255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 229,
+        ]
+        for block in [Self.traceBlockMin, Self.traceBlockMax, realCharger] {
+            XCTAssertEqual(PPSConfig.checksum(of: block), block[51])
+            XCTAssertEqual(block[0..<51].reduce(0, ^), block[51])
+        }
+    }
+
+    /// ppsRange exposes the widest recorded PPS window, so a charger with two
+    /// PPS PDOs (3.30–11.00 V and 5.00–20.00 V) lets the arbitrary voltage
+    /// reach 20 V rather than being capped at the first/narrower 11 V entry.
+    func testPPSRangeSpansWidestPPSPDO() throws {
+        var block = [UInt8](repeating: 0xFF, count: PPSConfig.size)
+        block[0] = 0xA0
+        block[1] = 0xA3
+        block[2] = 136; block[3] = 19
+        // One fixed PDO, then two PPS PDOs of different widths.
+        let words: [UInt32] = [
+            0x0001_912C,       // fixed 5.00 V / 3.00 A
+            0xC0DC_213C,       // PPS 3.30–11.00 V / 3.00 A
+            0xC190_3241,       // PPS 5.00–20.00 V / 3.25 A (widest max)
+        ]
+        block[5] = UInt8(words.count)
+        for (i, word) in words.enumerated() {
+            let base = 7 + i * 4
+            block[base] = UInt8(word & 0xFF)
+            block[base + 1] = UInt8((word >> 8) & 0xFF)
+            block[base + 2] = UInt8((word >> 16) & 0xFF)
+            block[base + 3] = UInt8((word >> 24) & 0xFF)
+        }
+        block[51] = PPSConfig.checksum(of: block)
+
+        let config = try PPSConfig(block: block)
+        XCTAssertEqual(config.pdos, [
+            .fixed(millivolts: 5000, maxMilliamps: 3000),
+            .pps(minMillivolts: 3300, maxMillivolts: 11000, maxMilliamps: 3000),
+            .pps(minMillivolts: 5000, maxMillivolts: 20000, maxMilliamps: 3250),
+        ])
+        XCTAssertEqual(config.ppsRange?.minMillivolts, 5000)
+        XCTAssertEqual(config.ppsRange?.maxMillivolts, 20000)
     }
 
     func testSelectionByteRoundTrips() {
@@ -261,8 +312,8 @@ final class PPSConfigTests: XCTestCase {
     }
 
     /// Setting an arbitrary PPS voltage from the real block: 0xA3 stays, the
-    /// saved voltage updates, the PDO list is preserved, and the additive
-    /// checksum tracks the change.
+    /// saved voltage updates, the PDO list is preserved, and the XOR checksum
+    /// tracks the change.
     func testUpdateArbitraryVoltagePreservesPDOList() throws {
         let raw: [UInt8] = [
             160, 163, 232, 28, 1, 6, 0, 44, 145, 1, 10, 44, 209, 2, 0, 44, 193, 3,
@@ -274,9 +325,10 @@ final class PPSConfigTests: XCTestCase {
         XCTAssertEqual(updated.selection, .arbitrary)
         XCTAssertEqual(updated.savedMillivolts, 9000)
         XCTAssertEqual(updated.pdos, config.pdos)           // PDO list intact
-        // Byte 2 went 232 -> (9000 & 0xFF)=40, byte 3 28 -> 35: net delta to
-        // the checksum is (40-232)+(35-28) = -185, 229-185 = 44.
-        XCTAssertEqual(updated.raw[51], 44)
+        // Byte 2 goes 232 -> 40, byte 3 goes 28 -> 35; the new checksum is the
+        // XOR of bytes [0..50], which is self-consistent by construction.
+        XCTAssertEqual(updated.raw[51], 26)
+        XCTAssertEqual(updated.raw[0..<51].reduce(0, ^), updated.raw[51])
     }
 
     func testReadPPSConfigReturnsBlock() async throws {

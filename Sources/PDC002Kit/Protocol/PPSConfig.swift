@@ -134,32 +134,44 @@ public struct PPSConfig: Equatable, Sendable {
         }
     }
 
-    /// The adjustable window (min, max millivolts) of the first recorded PPS
-    /// PDO, if any — the valid range for an arbitrary voltage.
+    /// The adjustable window (min, max millivolts) for an arbitrary voltage:
+    /// the widest recorded PPS PDO (the one with the highest max), so a charger
+    /// that advertises several PPS ranges (e.g. 5–11 V and 5–20 V) exposes the
+    /// full programmable span rather than just the first/narrowest entry. nil
+    /// when no PPS PDO was recorded.
     public var ppsRange: (minMillivolts: Int, maxMillivolts: Int)? {
+        var widest: (minMillivolts: Int, maxMillivolts: Int)?
         for pdo in pdos {
-            if case .pps(let low, let high, _) = pdo { return (low, high) }
+            if case .pps(let low, let high, _) = pdo,
+               high > (widest?.maxMillivolts ?? Int.min) {
+                widest = (low, high)
+            }
         }
-        return nil
+        return widest
+    }
+
+    /// The XOR-checksum byte (51) over bytes [0..50], the value the device
+    /// stores at the end of the block and validates when the cable attaches.
+    public static func checksum(of block: [UInt8]) -> UInt8 {
+        block[0..<51].reduce(0, ^)
     }
 
     /// Produce an updated block with a new selection and saved voltage,
     /// preserving every other byte (notably the recorded PDO list) and
     /// re-deriving the checksum.
     ///
-    /// The checksum is recomputed as a delta from this block's own checksum
-    /// rather than from scratch: byte 51 is an additive low-byte sum (the
-    /// captured config shows byte 1 going 0xA0→0xA1 move byte 51 0x64→0x65 in
-    /// lockstep), so adjusting it by the sum of the byte changes reproduces a
-    /// device-valid block without having to pin down the exact constant.
+    /// Byte 51 is an XOR of bytes [0..50] — verified against the captured
+    /// config writes and a real-charger dump (all three blocks satisfy
+    /// `[51] == XOR[0..50]`). An earlier additive-sum guess happened to match
+    /// the 0xA0→0xA1 selection flip (a single low-bit change, where add and XOR
+    /// agree) but produces a wrong byte for a multi-bit voltage change, which
+    /// the cable then rejects — falling back to its minimum (5 V) output.
     public func updating(selection: PPSSelection, savedMillivolts: Int) -> PPSConfig {
         var block = raw
         block[1] = selection.byte
         block[2] = UInt8(savedMillivolts & 0xFF)
         block[3] = UInt8((savedMillivolts >> 8) & 0xFF)
-        var checksum = Int(raw[51])
-        for i in 0..<51 { checksum += Int(block[i]) - Int(raw[i]) }
-        block[51] = UInt8(truncatingIfNeeded: checksum)
+        block[51] = Self.checksum(of: block)
         return PPSConfig(unchecked: block)
     }
 }
