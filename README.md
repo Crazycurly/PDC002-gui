@@ -14,6 +14,8 @@ Power-Delivery trigger cable** — a clean replacement for the Windows-only
 [![Latest release](https://img.shields.io/github/v/release/Crazycurly/PDC002-gui?label=release&color=2ea043)](https://github.com/Crazycurly/PDC002-gui/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/Crazycurly/PDC002-gui/total?color=8957e5)](https://github.com/Crazycurly/PDC002-gui/releases)
 
+**English** · [繁體中文](README.zh-TW.md)
+
 </div>
 
 ---
