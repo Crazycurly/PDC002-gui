@@ -21,8 +21,8 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_DIR/PDC002" "$APP/Contents/MacOS/PDC002"
 cp -R "$BIN_DIR/PDC002_PDC002Kit.bundle" "$APP/Contents/Resources/"
 
-# App icon — regenerate from the vector generator only when it has changed.
-if [ ! -f AppIcon.icns ] || [ Scripts/make_icon.swift -nt AppIcon.icns ]; then
+# App icon — regenerate only when the generator or source artwork has changed.
+if [ ! -f AppIcon.icns ] || [ Scripts/make_icon.swift -nt AppIcon.icns ] || [ AppIcon-source.png -nt AppIcon.icns ]; then
     swift Scripts/make_icon.swift AppIcon.iconset
     iconutil -c icns AppIcon.iconset -o AppIcon.icns
 fi
@@ -46,9 +46,9 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.1</string>
+    <string>1.2</string>
     <key>CFBundleVersion</key>
-    <string>2</string>
+    <string>3</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>NSHighResolutionCapable</key>

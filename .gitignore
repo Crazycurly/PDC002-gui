@@ -3,6 +3,11 @@
 PDC002.app/
 AppIcon.iconset/
 
+# Release artifacts (uploaded to GitHub Releases, not committed) and the raw
+# AI-generated art the icon is derived from (AppIcon-source.png is the master).
+*.zip
+Gemini_Generated_Image_*.png
+
 # Reverse-engineering source material (traces, vendor tool, PDFs, firmware):
 # kept locally, not committed.
 reference/

@@ -1,12 +1,68 @@
 #!/usr/bin/env swift
 // Generates AppIcon.iconset (and, via iconutil, AppIcon.icns) for PDC002 Flasher.
-// Pure Core Graphics — no external assets. Artwork is vector, re-rendered crisp
-// at every required pixel size. Run: swift Scripts/make_icon.swift [out.iconset]
+// Source artwork is a single high-res PNG (AppIcon-source.png). This script
+// center-crops it square, clips it into the macOS rounded-rect "squircle" with a
+// soft drop shadow, and re-renders crisp at every required icon size.
+// Run: swift Scripts/make_icon.swift [out.iconset] [source.png]
 import AppKit
 import CoreGraphics
 
 let outDir = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "AppIcon.iconset"
+let srcPath = CommandLine.arguments.count > 2 ? CommandLine.arguments[2] : "AppIcon-source.png"
 let fm = FileManager.default
+
+// Load the source artwork.
+guard let nsImage = NSImage(contentsOfFile: srcPath),
+      let src = nsImage.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+    fatalError("cannot load source image: \(srcPath)")
+}
+
+// Content-aware square crop: the bright subject sits off-centre in a wide field
+// of dark ground, so locate it by brightness and crop a padded square around it.
+// This keeps the artwork centred and large regardless of the source framing.
+let pad: CGFloat = 1.45   // crop side relative to the subject's longer dimension
+let crop = subjectCrop(of: src, pad: pad)
+guard let art = src.cropping(to: crop) else { fatalError("crop failed") }
+
+/// Find a square crop centred on the artwork's bright subject.
+func subjectCrop(of cg: CGImage, pad: CGFloat) -> CGRect {
+    let w = cg.width, h = cg.height
+    var px = [UInt8](repeating: 0, count: w * h * 4)
+    let ctx = CGContext(data: &px, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                        space: CGColorSpaceCreateDeviceRGB(),
+                        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+    ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+    func lum(_ x: Int, _ y: Int) -> Double {
+        let i = (y * w + x) * 4
+        return 0.2126 * Double(px[i]) + 0.7152 * Double(px[i + 1]) + 0.0722 * Double(px[i + 2])
+    }
+    // Background level from the four corners; subject is markedly brighter.
+    var bg = 0.0
+    for (cx, cy) in [(5, 5), (w - 6, 5), (5, h - 6), (w - 6, h - 6)] { bg += lum(cx, cy) }
+    bg /= 4
+    // Brightness "mass" projected onto each axis, then clip the sparse tails
+    // (faint motion streaks, the corner sparkle) to isolate the real subject.
+    var colM = [Double](repeating: 0, count: w), rowM = [Double](repeating: 0, count: h)
+    for y in 0..<h { for x in 0..<w {
+        let v = lum(x, y) - bg
+        if v > 30 { colM[x] += v; rowM[y] += v }
+    } }
+    func span(_ m: [Double]) -> (Int, Int) {
+        let total = m.reduce(0, +); var acc = 0.0; var lo = 0, hi = m.count - 1
+        for i in m.indices { acc += m[i]; if acc >= 0.015 * total { lo = i; break } }
+        acc = 0; for i in m.indices { acc += m[i]; if acc >= 0.985 * total { hi = i; break } }
+        return (lo, hi)
+    }
+    let (x0, x1) = span(colM), (y0, y1) = span(rowM)
+    let cx = CGFloat(x0 + x1) / 2, cy = CGFloat(y0 + y1) / 2
+    var side = CGFloat(max(x1 - x0, y1 - y0)) * pad
+    side = min(side, CGFloat(min(w, h)))                 // never larger than the image
+    var ox = cx - side / 2, oy = cy - side / 2
+    ox = min(max(ox, 0), CGFloat(w) - side)              // keep the crop inside the frame
+    oy = min(max(oy, 0), CGFloat(h) - side)
+    return CGRect(x: ox, y: oy, width: side, height: side)
+}
+
 try? fm.removeItem(atPath: outDir)
 try! fm.createDirectory(atPath: outDir, withIntermediateDirectories: true)
 
@@ -34,58 +90,13 @@ func draw(into ctx: CGContext, pixel: Int) {
     ctx.fillPath()
     ctx.restoreGState()
 
-    // Background gradient: electric blue (top) → deep indigo (bottom).
+    // Clip to the squircle and fill it with the cropped artwork.
     ctx.saveGState()
     ctx.addPath(body)
     ctx.clip()
-    let bg = CGGradient(colorsSpace: rgb,
-                        colors: [c(0.23, 0.49, 1.00), c(0.03, 0.13, 0.42)] as CFArray,
-                        locations: [0, 1])!
-    ctx.drawLinearGradient(bg, start: CGPoint(x: 512, y: 924), end: CGPoint(x: 512, y: 100), options: [])
-
-    // Top sheen for depth.
-    let sheen = CGGradient(colorsSpace: rgb,
-                           colors: [c(1, 1, 1, 0.22), c(1, 1, 1, 0)] as CFArray,
-                           locations: [0, 1])!
-    ctx.drawRadialGradient(sheen, startCenter: CGPoint(x: 512, y: 820), startRadius: 0,
-                           endCenter: CGPoint(x: 512, y: 820), endRadius: 560, options: [])
+    ctx.interpolationQuality = .high
+    ctx.draw(art, in: box)
     ctx.restoreGState()
-
-    // Lightning bolt (the hero glyph).
-    let pts = [
-        CGPoint(x: 575, y: 808), CGPoint(x: 330, y: 506), CGPoint(x: 476, y: 506),
-        CGPoint(x: 452, y: 214), CGPoint(x: 700, y: 548), CGPoint(x: 548, y: 548),
-    ]
-    let bolt = CGMutablePath()
-    bolt.move(to: pts[0])
-    for p in pts.dropFirst() { bolt.addLine(to: p) }
-    bolt.closeSubpath()
-
-    // Charged glow underneath the bolt.
-    ctx.saveGState()
-    ctx.setShadow(offset: .zero, blur: 34, color: c(1.0, 0.78, 0.2, 0.85))
-    ctx.addPath(bolt)
-    ctx.setFillColor(c(1, 0.7, 0, 1))
-    ctx.fillPath()
-    ctx.restoreGState()
-
-    // Amber gradient fill.
-    ctx.saveGState()
-    ctx.addPath(bolt)
-    ctx.clip()
-    let amber = CGGradient(colorsSpace: rgb,
-                           colors: [c(1.0, 0.92, 0.42), c(1.0, 0.62, 0.05)] as CFArray,
-                           locations: [0, 1])!
-    ctx.drawLinearGradient(amber, start: CGPoint(x: 512, y: 808), end: CGPoint(x: 512, y: 214),
-                           options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
-    ctx.restoreGState()
-
-    // Crisp edge.
-    ctx.addPath(bolt)
-    ctx.setLineWidth(7)
-    ctx.setLineJoin(.round)
-    ctx.setStrokeColor(c(0.78, 0.45, 0.0, 0.55))
-    ctx.strokePath()
 }
 
 let sizes = [16, 32, 64, 128, 256, 512, 1024]
